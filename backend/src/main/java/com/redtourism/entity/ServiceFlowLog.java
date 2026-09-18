@@ -6,17 +6,13 @@ import java.io.Serializable;
 import java.util.Date;
 
 @Data
-@TableName("service_chat")
-public class ServiceChat implements Serializable {
+@TableName("service_flow_log")
+public class ServiceFlowLog implements Serializable {
     private static final long serialVersionUID = 1L;
     @TableId(type = IdType.AUTO)
     private Long id;
     private Long userId;
-    private String sender;
-    private String msgType;
-    private String content;
+    private String step;
+    private String detail;
     private Date createTime;
-
-    @TableField(exist = false)
-    private String username;
 }

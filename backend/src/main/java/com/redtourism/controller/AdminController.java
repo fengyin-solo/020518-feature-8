@@ -56,6 +56,10 @@ public class AdminController {
     private com.redtourism.mapper.SpotSuggestionMapper spotSuggestionMapper;
     @Autowired
     private com.redtourism.mapper.ServiceChatMapper chatMapper;
+    @Autowired
+    private com.redtourism.mapper.ServiceSessionMapper sessionMapper;
+    @Autowired
+    private ServiceFlowService flowService;
 
     // ==================== 用户管理 ====================
 
@@ -705,41 +709,74 @@ public class AdminController {
 
     @GetMapping("/chat/sessions")
     public Result<List<Map<String, Object>>> chatSessions() {
-        java.util.ArrayList<Map<String, Object>> result = new java.util.ArrayList<>();
-        java.util.Set<Long> seen = new java.util.HashSet<>();
+        // 每个用户的最近一条消息
+        Map<Long, ServiceChat> lastByUser = new HashMap<>();
         List<ServiceChat> all = chatMapper.selectList(
                 new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<ServiceChat>()
-                        .orderByDesc(ServiceChat::getCreateTime));
+                        .orderByDesc(ServiceChat::getCreateTime)
+                        .orderByDesc(ServiceChat::getId));
         for (ServiceChat c : all) {
-            if (seen.contains(c.getUserId())) continue;
-            seen.add(c.getUserId());
+            lastByUser.putIfAbsent(c.getUserId(), c);
+        }
+        // 每个用户的链路阶段
+        Map<Long, ServiceSession> sessionByUser = new HashMap<>();
+        for (ServiceSession s : sessionMapper.selectList(null)) {
+            sessionByUser.put(s.getUserId(), s);
+        }
+        // 用户集合 = 有消息的 ∪ 有会话状态的
+        java.util.LinkedHashSet<Long> userIds = new java.util.LinkedHashSet<>();
+        userIds.addAll(lastByUser.keySet());
+        userIds.addAll(sessionByUser.keySet());
+
+        List<Map<String, Object>> result = new java.util.ArrayList<>();
+        for (Long userId : userIds) {
             Map<String, Object> m = new HashMap<>();
-            m.put("userId", c.getUserId());
-            User u = userMapper.selectById(c.getUserId());
-            m.put("username", u != null ? (u.getNickname() != null ? u.getNickname() : u.getUsername()) : "用户" + c.getUserId());
-            m.put("lastMessage", c.getContent());
-            m.put("lastTime", c.getCreateTime());
+            m.put("userId", userId);
+            User u = userMapper.selectById(userId);
+            m.put("username", u != null ? (u.getNickname() != null ? u.getNickname() : u.getUsername()) : "用户" + userId);
+            ServiceChat last = lastByUser.get(userId);
+            m.put("lastMessage", last != null ? last.getContent() : "");
+            m.put("lastType", last != null ? last.getMsgType() : null);
+            m.put("lastTime", last != null ? last.getCreateTime() : null);
+            ServiceSession s = sessionByUser.get(userId);
+            m.put("stage", s != null ? s.getStage() : Constants.CHAT_STAGE_BOT);
             result.add(m);
         }
+        // 待接入人工的会话排在最前，其余按最近消息时间倒序
+        result.sort((a, b) -> {
+            boolean aWait = Constants.CHAT_STAGE_TRANSFERRED.equals(a.get("stage"));
+            boolean bWait = Constants.CHAT_STAGE_TRANSFERRED.equals(b.get("stage"));
+            if (aWait != bWait) return aWait ? -1 : 1;
+            Date ta = (Date) a.get("lastTime"), tb = (Date) b.get("lastTime");
+            if (ta == null && tb == null) return 0;
+            if (ta == null) return 1;
+            if (tb == null) return -1;
+            return tb.compareTo(ta);
+        });
         return Result.success(result);
     }
 
     @GetMapping("/chat/history")
-    public Result<List<ServiceChat>> chatHistory(@RequestParam Long userId) {
-        return Result.success(chatMapper.selectList(
-                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<ServiceChat>()
-                        .eq(ServiceChat::getUserId, userId)
-                        .orderByAsc(ServiceChat::getCreateTime)));
+    public Result<Map<String, Object>> chatHistory(@RequestParam Long userId) {
+        ServiceSession s = flowService.getSession(userId);
+        Map<String, Object> data = new HashMap<>();
+        data.put("stage", s != null ? s.getStage() : Constants.CHAT_STAGE_BOT);
+        data.put("messages", flowService.listChats(userId));
+        data.put("logs", flowService.listLogs(userId));
+        return Result.success(data);
     }
 
     @GetMapping("/chat/send")
     public Result<String> adminSendChat(@RequestParam Long userId, @RequestParam String content) {
-        ServiceChat c = new ServiceChat();
-        c.setUserId(userId);
-        c.setSender("ADMIN");
-        c.setContent(content);
-        c.setCreateTime(new Date());
-        chatMapper.insert(c);
+        flowService.saveChat(userId, Constants.CHAT_SENDER_ADMIN, Constants.CHAT_MSG_TEXT, content);
+        ServiceSession s = flowService.getSession(userId);
+        if (s == null || !Constants.CHAT_STAGE_HUMAN.equals(s.getStage())) {
+            // 人工客服首次接入，链路进入人工服务阶段并留痕
+            String brief = content.length() > 100 ? content.substring(0, 100) + "…" : content;
+            flowService.log(userId, Constants.FLOW_ADMIN_REPLY, "人工客服接入并回复：" + brief);
+            flowService.updateSession(userId, Constants.CHAT_STAGE_HUMAN, null,
+                    s != null ? s.getResolvedFaqId() : null);
+        }
         return Result.success("发送成功", null);
     }
 

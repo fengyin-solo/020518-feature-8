@@ -11,23 +11,38 @@
         .chat-sessions{width:30%;border-right:1px solid #e8e8e8;display:flex;flex-direction:column;min-width:0}
         .chat-sessions-header{padding:16px;flex-shrink:0;border-bottom:1px solid #f0f0f0;font-weight:600;font-size:15px}
         .chat-sessions-list{flex:1;overflow-y:auto;padding:8px 0}
-        .session-item{padding:16px;cursor:pointer;border-bottom:1px solid #f5f5f5;transition:background .2s;display:flex;flex-direction:column;gap:4px}
+        .session-item{padding:14px 16px;cursor:pointer;border-bottom:1px solid #f5f5f5;transition:background .2s;display:flex;flex-direction:column;gap:6px}
         .session-item:hover,.session-item.active{background:#fafafa}
         .session-item.active{background:rgba(196,26,26,.06);border-left:3px solid #C41A1A;margin-left:0;padding-left:13px}
+        .session-item-head{display:flex;justify-content:space-between;align-items:center;gap:8px}
         .session-username{font-weight:600;font-size:14px;color:#333}
         .session-preview{font-size:12px;color:#888;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+        .stage-badge{display:inline-block;padding:2px 10px;border-radius:10px;font-size:11px;font-weight:600;white-space:nowrap;flex-shrink:0}
         .chat-panel{flex:1;display:flex;flex-direction:column;min-width:0}
         .chat-panel-empty{flex:1;display:flex;align-items:center;justify-content:center;color:#999;font-size:14px;flex-direction:column;gap:12px}
         .chat-panel-empty i{font-size:48px;opacity:.5}
+        .chat-panel-header{padding:10px 16px;border-bottom:1px solid #f0f0f0;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;background:#fafafa}
+        .chat-panel-header .header-title{font-weight:600;font-size:14px;color:#333;display:flex;align-items:center;gap:10px}
+        .flow-panel{max-height:220px;overflow-y:auto;padding:10px 16px;border-bottom:1px solid #f0f0f0;background:#fcfcfc;flex-shrink:0}
+        .flow-item{display:flex;gap:10px;padding:6px 0;border-bottom:1px dashed #f0f0f0;font-size:12px;align-items:flex-start}
+        .flow-item:last-child{border-bottom:none}
+        .flow-step-tag{flex-shrink:0;min-width:56px;text-align:center;border-radius:4px;background:#f0f0f0;color:#666;padding:2px 6px}
+        .flow-detail{flex:1;color:#555;white-space:pre-wrap;word-break:break-word;line-height:1.5}
+        .flow-time{color:#aaa;flex-shrink:0}
         .chat-messages{flex:1;padding:20px;overflow-y:auto;display:flex;flex-direction:column;gap:12px}
         .chat-msg{display:flex;gap:10px;max-width:85%}
         .chat-msg.user{align-self:flex-start;flex-direction:row}
         .chat-msg.admin{align-self:flex-end;flex-direction:row-reverse}
+        .chat-msg.bot{align-self:flex-start;flex-direction:row}
         .chat-msg .chat-bubble{padding:12px 16px;border-radius:12px;font-size:14px;line-height:1.5}
         .chat-msg.user .chat-bubble{background:#e6f7ff;color:#1890ff;border-bottom-left-radius:4px}
         .chat-msg.admin .chat-bubble{background:#f6ffed;color:#52c41a;border-bottom-right-radius:4px}
+        .chat-msg.bot .chat-bubble{background:#f5f5f5;color:#666;border-bottom-left-radius:4px}
         .chat-msg .chat-bubble{display:flex;flex-direction:column;align-items:flex-start}
-.chat-msg .chat-time{font-size:11px;color:inherit;opacity:.7;margin-top:4px}
+        .chat-msg .chat-time{font-size:11px;color:inherit;opacity:.7;margin-top:4px}
+        .chat-sys{align-self:center;font-size:12px;color:#999;background:#f0f0f0;border-radius:12px;padding:4px 14px;max-width:85%}
+        .candidate-list{margin-top:6px;display:flex;flex-direction:column;gap:4px}
+        .candidate-item{padding:4px 10px;border:1px solid #d9d9d9;border-radius:12px;font-size:12px;color:#666;background:#fff}
         .chat-input-wrap{display:flex;gap:8px;padding:16px;border-top:1px solid #e8e8e8;flex-shrink:0}
         .chat-input-wrap input{flex:1;padding:10px 16px;border:1px solid #d9d9d9;border-radius:6px;font-size:14px;outline:none}
         .chat-input-wrap input:focus{border-color:#C41A1A}
@@ -76,6 +91,11 @@
                         <i class="fas fa-headset"></i>
                         <p>请从左侧选择会话开始沟通</p>
                     </div>
+                    <div class="chat-panel-header" id="chatPanelHeader" style="display:none">
+                        <span class="header-title">会话详情 <span id="chatStageBadge"></span></span>
+                        <button class="btn btn-outline btn-sm" onclick="toggleFlowPanel()"><i class="fas fa-stream"></i> 处理经过</button>
+                    </div>
+                    <div class="flow-panel" id="flowPanel" style="display:none"></div>
                     <div class="chat-messages" id="chatMessages" style="display:none"></div>
                     <div class="chat-input-wrap" id="chatInputWrap" style="display:none">
                         <input type="text" id="chatInput" placeholder="输入回复内容..." onkeyup="if(event.key==='Enter')sendMessage()">
@@ -93,6 +113,28 @@ if (!requireAdmin()) throw '';
 renderSidebar();
 
 let selectedUserId = null;
+let currentStage = 'BOT';
+let lastMsgKey = '';
+let lastLogKey = '';
+
+/* 链路阶段展示配置：列表页与详情页共用 */
+const STAGE_MAP = {
+    BOT:         { label: '智能客服',   color: '#1890ff', bg: '#e6f7ff' },
+    CLARIFYING:  { label: '待用户确认', color: '#fa8c16', bg: '#fff7e6' },
+    ANSWERED:    { label: '已智能解答', color: '#52c41a', bg: '#f6ffed' },
+    TRANSFERRED: { label: '待人工接入', color: '#f5222d', bg: '#fff1f0' },
+    HUMAN:       { label: '人工服务中', color: '#722ed1', bg: '#f9f0ff' }
+};
+/* 处理经过步骤名称 */
+const STEP_MAP = {
+    ASK: '用户提问', CLARIFY: '列出候选', SELECT: '选定问题', ANSWER: '智能答复',
+    NONE: '未命中', TRANSFER: '转人工', ADMIN_REPLY: '人工接入'
+};
+
+function stageBadge(stage) {
+    const s = STAGE_MAP[stage] || STAGE_MAP.BOT;
+    return `<span class="stage-badge" style="color:${s.color};background:${s.bg}">${s.label}</span>`;
+}
 
 async function loadSessions() {
     const list = document.getElementById('sessionList');
@@ -101,10 +143,16 @@ async function loadSessions() {
     const arr = Array.isArray(data) ? data : (data.records || data.list || []);
     if (!arr.length) { list.innerHTML = '<div class="empty-state"><i class="fas fa-inbox"></i> 暂无会话</div>'; return; }
     list.innerHTML = arr.map(s => {
-        const preview = (s.lastMessage || '').substring(0, 40);
+        let preview = s.lastMessage || '';
+        if (s.lastType === 'CANDIDATES') preview = '[候选问题列表]';
+        else if (s.lastType === 'TRANSFER') preview = '[转人工提示]';
+        preview = preview.substring(0, 40);
         const time = s.lastTime ? formatDate(s.lastTime) : '';
-        return `<div class="session-item" data-user-id="${s.userId}" onclick="selectSession(${s.userId})">
-            <span class="session-username">${escHtml(s.username || '用户' + s.userId)}</span>
+        return `<div class="session-item ${selectedUserId == s.userId ? 'active' : ''}" data-user-id="${s.userId}" onclick="selectSession(${s.userId})">
+            <div class="session-item-head">
+                <span class="session-username">${escHtml(s.username || '用户' + s.userId)}</span>
+                ${stageBadge(s.stage)}
+            </div>
             <span class="session-preview">${escHtml(preview || '无消息')} ${time ? '· ' + time : ''}</span>
         </div>`;
     }).join('');
@@ -112,28 +160,82 @@ async function loadSessions() {
 
 function selectSession(userId) {
     selectedUserId = userId;
+    lastMsgKey = '';
+    lastLogKey = '';
     document.querySelectorAll('.session-item').forEach(el => {
         el.classList.toggle('active', el.dataset.userId == userId);
     });
     document.getElementById('chatEmpty').style.display = 'none';
+    document.getElementById('chatPanelHeader').style.display = 'flex';
     document.getElementById('chatMessages').style.display = 'flex';
     document.getElementById('chatInputWrap').style.display = 'flex';
     document.getElementById('chatMessages').innerHTML = '';
-    loadHistory(userId);
+    loadHistory(userId, true);
 }
 
-async function loadHistory(userId) {
+function toggleFlowPanel() {
+    const p = document.getElementById('flowPanel');
+    p.style.display = p.style.display === 'none' ? 'block' : 'none';
+}
+
+function renderStageBadge() {
+    document.getElementById('chatStageBadge').innerHTML = stageBadge(currentStage);
+}
+
+function renderMsg(m) {
+    const time = formatDate(m.createTime);
+    if (m.sender === 'USER') {
+        return `<div class="chat-msg user"><div class="chat-bubble">${escHtml(m.content || '')}<div class="chat-time">${time}</div></div></div>`;
+    }
+    if (m.sender === 'ADMIN') {
+        return `<div class="chat-msg admin"><div class="chat-bubble">${escHtml(m.content || '')}<div class="chat-time">${time}</div></div></div>`;
+    }
+    // 智能客服消息
+    if (m.msgType === 'TRANSFER') {
+        return `<div class="chat-sys"><i class="fas fa-headset"></i> ${escHtml(m.content || '')}</div>`;
+    }
+    if (m.msgType === 'CANDIDATES') {
+        let p = null;
+        try { p = JSON.parse(m.content); } catch (e) {}
+        if (p && p.candidates) {
+            return `<div class="chat-msg bot"><div class="chat-bubble"><span><i class="fas fa-robot"></i> ${escHtml(p.text || '候选问题')}</span>
+                <div class="candidate-list">${p.candidates.map(c => `<span class="candidate-item">${escHtml(c.question)}</span>`).join('')}</div>
+                <div class="chat-time">${time}</div></div></div>`;
+        }
+    }
+    return `<div class="chat-msg bot"><div class="chat-bubble"><span><i class="fas fa-robot"></i> ${escHtml(m.content || '')}</span><div class="chat-time">${time}</div></div></div>`;
+}
+
+async function loadHistory(userId, force) {
     const data = await api('/api/admin/chat/history?userId=' + userId);
-    const wrap = document.getElementById('chatMessages');
     if (!data) return;
-    const list = Array.isArray(data) ? data : (data.records || data.list || []);
-    wrap.innerHTML = list.map(m => {
-        const isUser = m.sender === 'USER';
-        return `<div class="chat-msg ${isUser ? 'user' : 'admin'}">
-            <div class="chat-bubble">${escHtml(m.content || '')}<div class="chat-time">${formatDate(m.createTime)}</div></div>
-        </div>`;
-    }).join('');
-    wrap.scrollTop = wrap.scrollHeight;
+    currentStage = data.stage || 'BOT';
+    renderStageBadge();
+    const msgs = Array.isArray(data.messages) ? data.messages : [];
+    const key = msgs.length + ':' + (msgs.length ? msgs[msgs.length - 1].id : 0);
+    if (force || key !== lastMsgKey) {
+        lastMsgKey = key;
+        const wrap = document.getElementById('chatMessages');
+        wrap.innerHTML = msgs.map(renderMsg).join('');
+        wrap.scrollTop = wrap.scrollHeight;
+    }
+    renderFlowLogs(Array.isArray(data.logs) ? data.logs : []);
+}
+
+function renderFlowLogs(logs) {
+    const key = logs.length + ':' + (logs.length ? logs[logs.length - 1].id : 0);
+    if (key === lastLogKey) return;
+    lastLogKey = key;
+    const panel = document.getElementById('flowPanel');
+    if (!logs.length) {
+        panel.innerHTML = '<div style="color:#999;font-size:12px;padding:4px 0">暂无处理记录</div>';
+        return;
+    }
+    panel.innerHTML = logs.map(l => `<div class="flow-item">
+        <span class="flow-step-tag">${STEP_MAP[l.step] || l.step}</span>
+        <span class="flow-detail">${escHtml(l.detail || '')}</span>
+        <span class="flow-time">${formatDate(l.createTime)}</span>
+    </div>`).join('');
 }
 
 async function sendMessage() {
@@ -143,16 +245,17 @@ async function sendMessage() {
     const res = await api('/api/admin/chat/send?userId=' + selectedUserId + '&content=' + encodeURIComponent(content));
     if (res !== null) {
         input.value = '';
-        const wrap = document.getElementById('chatMessages');
-        wrap.innerHTML += `<div class="chat-msg admin">
-            <div class="chat-bubble">${escHtml(content)}<div class="chat-time">${formatDate(new Date())}</div></div>
-        </div>`;
-        wrap.scrollTop = wrap.scrollHeight;
+        loadHistory(selectedUserId, true);
         loadSessions();
     }
 }
 
 loadSessions();
+/* 5秒轮询：会话列表与当前会话的链路阶段、消息、处理经过保持最新 */
+setInterval(() => {
+    loadSessions();
+    if (selectedUserId) loadHistory(selectedUserId, false);
+}, 5000);
 </script>
 </body>
 </html>

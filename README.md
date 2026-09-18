@@ -55,7 +55,7 @@ docker compose up --build -d
 | 消息通知 `messages.html` | 系统消息列表（审核结果/评论回复/反馈回复自动推送） |
 | 我的线路 `my-routes.html` | 创建/编辑/删除自定义线路，拖拽添加景点，提交申请官方推荐，查看审核状态与驳回原因 |
 | 问题反馈 `feedback.html` | 提交 Bug/建议/投诉（支持从景点详情预填信息），查看历史反馈及管理员回复 |
-| 客服中心 `faq.html` | 智能客服（FAQ关键词匹配自动回复）+ **人工客服**（一键切换，5秒轮询实时显示管理员回复） |
+| 客服中心 `faq.html` | 智能客服（**先追问再回答**：命中多个相近问题时列出候选让用户挑选，选定后给出完整答复，答不上来可一键转人工并自动携带前文对话）+ 链路进度指示（问答→确认→解答→人工）+ 历史消息持久化（重新进入保持原有顺序） |
 | 多语言 | 中/英/日三语切换（导航栏 select，后端 API 支持 `lang=zh/en/ja` 参数） |
 
 ### 管理端（http://localhost:8084）— 16 个页面
@@ -76,7 +76,7 @@ docker compose up --build -d
 | 线路审核 `route-review.html` | 审核用户申请推荐的自定义线路，通过后纳入官方推荐，驳回填写原因，操作自动通知用户 |
 | **景点审核** `spot-review.html` | 审核用户提交的景点信息更正建议，通过后自动更新景点字段，驳回附理由，操作自动通知用户 |
 | **权限配置** `permissions.html` | 角色 CRUD（新增/修改/删除角色）、菜单权限精细化分配（启用/禁用各角色对菜单/按钮的访问） |
-| **人工客服** `customer-service.html` | 左侧用户会话列表（显示最新消息预览），右侧对话面板，管理员实时回复用户咨询 |
+| **人工客服** `customer-service.html` | 会话列表与详情页同步展示链路阶段（智能客服/待用户确认/已智能解答/待人工接入/人工服务中，待接入置顶），详情页可展开**处理经过**时间线（提问/候选/选定/答复/转人工/人工接入全程留痕），5秒轮询实时更新 |
 | 管理员登录 `login.html` | 独立管理员身份验证 |
 
 ---
@@ -150,9 +150,11 @@ docker compose up --build -d
 | 端点 | 说明 |
 |------|------|
 | `GET /api/faq/list` | FAQ 列表 |
-| `GET /api/faq/ask?question=` | 智能客服问答 |
+| `GET /api/faq/ask?question=` | 智能客服提问，返回 `type=ANSWER/CANDIDATES/NONE`（多命中返回候选列表），登录用户全程落库 |
+| `GET /api/faq/confirm?faqId=` | 用户选定候选问题，返回完整答复 |
+| `GET /api/chat/transfer` | 转人工客服（更新链路阶段，前文对话摘要一并留痕） |
 | `GET /api/chat/send?content=` | 向人工客服发送消息（需登录） |
-| `GET /api/chat/history` | 查看与客服的对话记录 |
+| `GET /api/chat/history` | 当前会话阶段 + 全部消息（按 id 正序，含智能客服问答） |
 | `GET /api/feedback/submit?category=&title=&content=` | 提交问题反馈 |
 | `GET /api/feedback/my` | 我的反馈记录 |
 
@@ -193,9 +195,9 @@ docker compose up --build -d
 | `GET /api/admin/spotSuggestion/approve?id=` | 通过景点更正（自动更新景点数据） |
 | `GET /api/admin/spotSuggestion/reject?id=&reason=` | 驳回景点更正 |
 | `GET /api/admin/spotSuggestion/pendingCount` | 景点更正待审数量 |
-| `GET /api/admin/chat/sessions` | 客服用户会话列表 |
-| `GET /api/admin/chat/history?userId=` | 查看指定用户对话记录 |
-| `GET /api/admin/chat/send?userId=&content=` | 管理员发送客服消息 |
+| `GET /api/admin/chat/sessions` | 客服用户会话列表（含链路阶段，待人工接入置顶） |
+| `GET /api/admin/chat/history?userId=` | 指定用户会话阶段 + 对话记录 + 处理经过日志 |
+| `GET /api/admin/chat/send?userId=&content=` | 管理员发送客服消息（首次接入自动转入人工服务阶段） |
 | `GET /api/admin/role/list` | 角色列表 |
 | `GET /api/admin/role/save?code=&name=&description=` | 新增/编辑角色 |
 | `GET /api/admin/role/delete?id=` | 删除角色 |
@@ -246,14 +248,15 @@ docker compose up --build -d
 label-02051/
 ├── backend/                          # SpringBoot 后端（~4000 行代码）
 │   ├── src/main/java/com/redtourism/
-│   │   ├── config/                   # Security / CORS / MybatisPlus / WebMvc 配置
+│   │   ├── config/                   # Security / CORS / MybatisPlus / WebMvc / 表结构迁移 配置
 │   │   ├── common/                   # Result 统一响应、全局异常处理、常量
-│   │   ├── entity/                   # 22 个实体类
-│   │   ├── mapper/                   # 22 个 MyBatis-Plus Mapper
-│   │   ├── service/                  # 11 个业务接口 + 实现
-│   │   └── controller/               # 20 个 REST Controller（~1900 行）
+│   │   ├── dto/                      # 智能客服匹配结果等传输对象
+│   │   ├── entity/                   # 24 个实体类
+│   │   ├── mapper/                   # 24 个 MyBatis-Plus Mapper
+│   │   ├── service/                  # 12 个业务接口 + 实现
+│   │   └── controller/               # 20 个 REST Controller（~2000 行）
 │   ├── src/main/resources/
-│   │   ├── schema.sql                # 建表脚本（22 张表）
+│   │   ├── schema.sql                # 建表脚本（24 张表）
 │   │   ├── data.sql                  # 初始化数据（景点/线路/文化/酒店/美食/FAQ等）
 │   │   └── application.yml           # 应用配置（session 30min、文件上传 10MB）
 │   ├── uploads/                      # 图片资源（49 张，含景点/线路/酒店/美食封面）
@@ -278,7 +281,7 @@ label-02051/
     └── SelfTestReport.md
 ```
 
-### 数据库表清单（22 张）
+### 数据库表清单（24 张）
 
 | 表名 | 说明 | 初始数据 |
 |------|------|---------|
@@ -303,7 +306,9 @@ label-02051/
 | `feedback` | 用户问题反馈 | 若干 |
 | `user_custom_route` | 用户自定义线路 | 3 条 |
 | `spot_suggestion` | 景点信息更正建议 | — |
-| `service_chat` | 人工客服对话记录 | — |
+| `service_chat` | 客服对话记录（USER/BOT/ADMIN，含消息类型） | — |
+| `service_session` | 客服会话链路阶段（BOT/CLARIFYING/ANSWERED/TRANSFERRED/HUMAN） | — |
+| `service_flow_log` | 客服链路处理经过（提问/候选/选定/答复/转人工/人工接入） | — |
 
 ---
 
@@ -333,6 +338,6 @@ label-02051/
 1. **Docker 构建**：使用多阶段 `Dockerfile`，容器内自动执行 Maven 构建，无需本地预装 Java/Maven 环境，真正一键启动。首次构建因需下载 Maven 依赖耗时约 3-5 分钟，后续有层缓存构建会快很多。
 2. **数据持久化**：MySQL 数据通过 Docker named volume `mysql-data` 持久化，`docker compose down` 不会丢失数据；`docker compose down -v` 会清除数据并在下次启动时重新初始化。
 3. **图片上传**：支持 10MB 以内图片上传，存储于 `backend/uploads/` 目录，通过 Nginx 静态服务以 `/uploads/` 路径访问。
-4. **智能客服**：基于 FAQ 表关键词相似度匹配实现自动回复，非 AI 大模型；人工客服采用前端轮询（5 秒间隔）模拟实时效果。
+4. **智能客服**：基于 FAQ 表关键词相似度匹配实现自动回复，非 AI 大模型；命中多个相近问题时先列出候选让用户挑选，选定后给出完整答复，未命中可一键转人工；人工客服采用前端轮询（5 秒间隔）模拟实时效果。登录用户的全程问答、链路阶段与处理经过分别落库于 `service_chat` / `service_session` / `service_flow_log`，老数据卷启动时由 `SchemaMigration` 自动补齐表结构。
 5. **多语言**：英文（en）和日文（ja）内容需在管理端景点/线路/文化编辑页面手动填写对应语言字段（`name_en`/`name_ja`/`description_en`/`description_ja` 等），初始化数据中已为部分景点提供英/日文示例。
 6. **Session 超时**：默认 30 分钟，配置于 `application.yml`；前端每 5 分钟检测一次 session 状态，超时自动弹窗提示并跳转登录页。

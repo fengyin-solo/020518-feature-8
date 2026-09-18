@@ -284,12 +284,35 @@ CREATE TABLE IF NOT EXISTS spot_suggestion (
     INDEX idx_status (status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- 人工客服对话
+-- 人工客服对话（sender: USER/BOT/ADMIN，智能客服消息也落库以保证历史顺序）
 CREATE TABLE IF NOT EXISTS service_chat (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     user_id BIGINT NOT NULL,
-    sender VARCHAR(10) NOT NULL COMMENT 'USER/ADMIN',
+    sender VARCHAR(10) NOT NULL COMMENT 'USER/BOT/ADMIN',
+    msg_type VARCHAR(20) DEFAULT 'TEXT' COMMENT 'TEXT/CANDIDATES/NONE/TRANSFER',
     content TEXT NOT NULL,
+    create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_user (user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 客服会话链路状态（每个用户一条，记录"提问→追问→答复→转人工"走到哪一步）
+CREATE TABLE IF NOT EXISTS service_session (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    user_id BIGINT NOT NULL,
+    stage VARCHAR(20) NOT NULL DEFAULT 'BOT' COMMENT 'BOT|CLARIFYING|ANSWERED|TRANSFERRED|HUMAN',
+    pending_faq_ids VARCHAR(500) COMMENT '当前待用户选择的候选FAQ id（逗号分隔）',
+    resolved_faq_id BIGINT COMMENT '最终命中并答复的FAQ id',
+    create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+    update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_user (user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 客服链路处理经过（可追溯）
+CREATE TABLE IF NOT EXISTS service_flow_log (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    user_id BIGINT NOT NULL,
+    step VARCHAR(20) NOT NULL COMMENT 'ASK|CLARIFY|SELECT|ANSWER|NONE|TRANSFER|ADMIN_REPLY',
+    detail TEXT COMMENT '步骤详情（提问内容/候选列表/选择结果/答复来源/转人工携带的对话摘要）',
     create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
     INDEX idx_user (user_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
