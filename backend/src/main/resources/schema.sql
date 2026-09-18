@@ -284,14 +284,30 @@ CREATE TABLE IF NOT EXISTS spot_suggestion (
     INDEX idx_status (status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- 人工客服对话
+-- 客服对话（智能客服追问链路 + 人工客服统一消息流）
 CREATE TABLE IF NOT EXISTS service_chat (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     user_id BIGINT NOT NULL,
-    sender VARCHAR(10) NOT NULL COMMENT 'USER/ADMIN',
+    sender VARCHAR(10) NOT NULL COMMENT 'USER用户 / ADMIN人工客服 / BOT智能客服 / SYSTEM系统',
+    msg_type VARCHAR(16) NOT NULL DEFAULT 'CHAT' COMMENT 'CHAT普通消息/CLARIFY候选追问/ANSWER完整答复/FALLBACK未命中/HANDOFF转人工通知',
     content TEXT NOT NULL,
+    ref_ids VARCHAR(255) COMMENT '候选FAQ id列表，逗号分隔（CLARIFY使用）',
+    trace_no VARCHAR(32) COMMENT '处理经过追踪号：同一轮提问链路（提问→追问→答复/转人工）共用一个编号',
+    stage VARCHAR(16) COMMENT '该消息产生时所处链路阶段：ASK/CLARIFY/ANSWER/WAITING_HUMAN/IN_HUMAN',
     create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
-    INDEX idx_user (user_id)
+    INDEX idx_user (user_id),
+    INDEX idx_trace (trace_no)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 客服会话状态（每个用户一条，记录链路当前走到哪一步）
+CREATE TABLE IF NOT EXISTS service_session (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    user_id BIGINT NOT NULL UNIQUE,
+    stage VARCHAR(16) NOT NULL DEFAULT 'ASK' COMMENT 'ASK智能客服提问中/CLARIFY待用户选择候选/ANSWER机器人已答复/WAITING_HUMAN等待人工接入/IN_HUMAN人工服务中',
+    pending_faq_ids VARCHAR(255) COMMENT 'CLARIFY阶段待选FAQ id列表，逗号分隔',
+    active_trace_no VARCHAR(32) COMMENT '当前进行中的处理经过追踪号',
+    update_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+    create_time DATETIME DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- 问题反馈

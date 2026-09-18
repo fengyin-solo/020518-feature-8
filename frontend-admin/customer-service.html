@@ -9,13 +9,35 @@
     <style>
         .chat-layout{display:flex;gap:0;height:calc(100vh - 140px);background:#fff;border-radius:8px;border:1px solid #e8e8e8;overflow:hidden}
         .chat-sessions{width:30%;border-right:1px solid #e8e8e8;display:flex;flex-direction:column;min-width:0}
-        .chat-sessions-header{padding:16px;flex-shrink:0;border-bottom:1px solid #f0f0f0;font-weight:600;font-size:15px}
+        .chat-sessions-header{padding:16px;flex-shrink:0;border-bottom:1px solid #f0f0f0;font-weight:600;font-size:15px;display:flex;justify-content:space-between;align-items:center}
         .chat-sessions-list{flex:1;overflow-y:auto;padding:8px 0}
-        .session-item{padding:16px;cursor:pointer;border-bottom:1px solid #f5f5f5;transition:background .2s;display:flex;flex-direction:column;gap:4px}
+        .session-item{padding:14px 16px;cursor:pointer;border-bottom:1px solid #f5f5f5;transition:background .2s;display:flex;flex-direction:column;gap:5px}
         .session-item:hover,.session-item.active{background:#fafafa}
-        .session-item.active{background:rgba(196,26,26,.06);border-left:3px solid #C41A1A;margin-left:0;padding-left:13px}
-        .session-username{font-weight:600;font-size:14px;color:#333}
+        .session-item.active{background:rgba(196,26,26,.06);border-left:3px solid #C41A1A;padding-left:13px}
+        .session-row1{display:flex;justify-content:space-between;align-items:center;gap:8px}
+        .session-username{font-weight:600;font-size:14px;color:#333;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
         .session-preview{font-size:12px;color:#888;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+        .unread-badge{background:#C41A1A;color:#fff;border-radius:10px;font-size:11px;min-width:18px;height:18px;display:inline-flex;align-items:center;justify-content:center;padding:0 5px;flex-shrink:0}
+        .stage-badge{display:inline-block;padding:1px 8px;border-radius:10px;font-size:11px;line-height:18px;flex-shrink:0}
+        .stage-ASK{background:#e6f4ff;color:#1677ff}
+        .stage-CLARIFY{background:#fff3e6;color:#d46b08}
+        .stage-ANSWER{background:#edfae3;color:#389e0d}
+        .stage-WAITING_HUMAN{background:#fff7e6;color:#d48806}
+        .stage-IN_HUMAN{background:#fff1f0;color:#cf1322}
+        .sender-bot-tag{font-size:10px;padding:0 5px;border-radius:3px;background:#f0f0f0;color:#777;margin-left:6px}
+        .sender-system-tag{font-size:10px;padding:0 5px;border-radius:3px;background:#fff3e6;color:#d46b08;margin-left:6px}
+
+        /* 链路步骤条 */
+        .stage-stepper{display:flex;align-items:center;padding:12px 20px;border-bottom:1px solid #f0f0f0;background:#fcfcfc;flex-shrink:0;gap:0;overflow-x:auto}
+        .step-item{display:flex;align-items:center;gap:6px;font-size:12px;color:#aaa;white-space:nowrap}
+        .step-item .step-dot{width:20px;height:20px;border-radius:50%;background:#eee;color:#999;display:flex;align-items:center;justify-content:center;font-size:11px;flex-shrink:0}
+        .step-item.done{color:#52c41a}
+        .step-item.done .step-dot{background:#52c41a;color:#fff}
+        .step-item.current{color:#C41A1A;font-weight:600}
+        .step-item.current .step-dot{background:#C41A1A;color:#fff}
+        .step-line{width:28px;height:2px;background:#e8e8e8;margin:0 8px;flex-shrink:0}
+        .step-line.done{background:#52c41a}
+
         .chat-panel{flex:1;display:flex;flex-direction:column;min-width:0}
         .chat-panel-empty{flex:1;display:flex;align-items:center;justify-content:center;color:#999;font-size:14px;flex-direction:column;gap:12px}
         .chat-panel-empty i{font-size:48px;opacity:.5}
@@ -23,11 +45,22 @@
         .chat-msg{display:flex;gap:10px;max-width:85%}
         .chat-msg.user{align-self:flex-start;flex-direction:row}
         .chat-msg.admin{align-self:flex-end;flex-direction:row-reverse}
-        .chat-msg .chat-bubble{padding:12px 16px;border-radius:12px;font-size:14px;line-height:1.5}
-        .chat-msg.user .chat-bubble{background:#e6f7ff;color:#1890ff;border-bottom-left-radius:4px}
-        .chat-msg.admin .chat-bubble{background:#f6ffed;color:#52c41a;border-bottom-right-radius:4px}
-        .chat-msg .chat-bubble{display:flex;flex-direction:column;align-items:flex-start}
-.chat-msg .chat-time{font-size:11px;color:inherit;opacity:.7;margin-top:4px}
+        .chat-msg.bot{align-self:flex-start;flex-direction:row}
+        .chat-msg.system{align-self:center;max-width:90%}
+        .chat-msg .chat-avatar{width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:14px;color:#fff}
+        .chat-msg.user .chat-avatar{background:#1890ff}
+        .chat-msg.admin .chat-avatar{background:#52c41a}
+        .chat-msg.bot .chat-avatar{background:#8c8c8c}
+        .chat-msg.system .chat-avatar{display:none}
+        .chat-msg .chat-bubble{padding:10px 14px;border-radius:10px;font-size:14px;line-height:1.6;white-space:pre-wrap;word-break:break-word}
+        .chat-msg.user .chat-bubble{background:#e6f7ff;color:#333;border-bottom-left-radius:4px}
+        .chat-msg.admin .chat-bubble{background:#f6ffed;color:#333;border-bottom-right-radius:4px}
+        .chat-msg.bot .chat-bubble{background:#f5f5f5;color:#333;border-bottom-left-radius:4px}
+        .chat-msg.system .chat-bubble{background:#fffbe6;border:1px solid #ffe58f;color:#8c6d1f;border-radius:8px;font-size:13px}
+        .chat-msg .chat-time{font-size:11px;color:#aaa;margin-top:5px}
+        .chat-msg.admin .chat-time{text-align:right}
+        .chat-trace{font-size:10px;color:#bbb}
+        .chat-msg.system .chat-trace{color:#b59a55}
         .chat-input-wrap{display:flex;gap:8px;padding:16px;border-top:1px solid #e8e8e8;flex-shrink:0}
         .chat-input-wrap input{flex:1;padding:10px 16px;border:1px solid #d9d9d9;border-radius:6px;font-size:14px;outline:none}
         .chat-input-wrap input:focus{border-color:#C41A1A}
@@ -66,7 +99,7 @@
         <div class="content">
             <div class="chat-layout">
                 <div class="chat-sessions">
-                    <div class="chat-sessions-header"><i class="fas fa-comments"></i> 会话列表</div>
+                    <div class="chat-sessions-header"><span><i class="fas fa-comments"></i> 会话列表</span><span id="sessCount" style="font-size:12px;color:#999;font-weight:400"></span></div>
                     <div class="chat-sessions-list" id="sessionList">
                         <div class="loading"><i class="fas fa-spinner fa-spin"></i> 加载中...</div>
                     </div>
@@ -76,10 +109,13 @@
                         <i class="fas fa-headset"></i>
                         <p>请从左侧选择会话开始沟通</p>
                     </div>
-                    <div class="chat-messages" id="chatMessages" style="display:none"></div>
-                    <div class="chat-input-wrap" id="chatInputWrap" style="display:none">
-                        <input type="text" id="chatInput" placeholder="输入回复内容..." onkeyup="if(event.key==='Enter')sendMessage()">
-                        <button class="btn btn-primary" onclick="sendMessage()"><i class="fas fa-paper-plane"></i> 发送</button>
+                    <div id="chatActive" style="display:none;flex-direction:column;flex:1;min-height:0">
+                        <div class="stage-stepper" id="stageStepper"></div>
+                        <div class="chat-messages" id="chatMessages"></div>
+                        <div class="chat-input-wrap">
+                            <input type="text" id="chatInput" placeholder="输入回复内容..." onkeyup="if(event.key==='Enter')sendMessage()">
+                            <button class="btn btn-primary" onclick="sendMessage()"><i class="fas fa-paper-plane"></i> 发送</button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -93,63 +129,152 @@ if (!requireAdmin()) throw '';
 renderSidebar();
 
 let selectedUserId = null;
+let pollTimer = null;
+let lastMsgSignature = '';
+
+const STAGE_LABELS = {
+    ASK: '提问中',
+    CLARIFY: '待选问题',
+    ANSWER: '已答复',
+    WAITING_HUMAN: '等待人工',
+    IN_HUMAN: '人工服务中'
+};
+// 链路步骤及对应阶段（同一步可由多个阶段命中）
+const STEPS = [
+    { key: 'ask',     label: '提问',   stages: ['ASK', 'CLARIFY', 'ANSWER', 'WAITING_HUMAN', 'IN_HUMAN'] },
+    { key: 'clarify', label: '追问确认', stages: ['CLARIFY', 'ANSWER', 'WAITING_HUMAN', 'IN_HUMAN'] },
+    { key: 'answer',  label: '答复/未命中', stages: ['ANSWER', 'WAITING_HUMAN', 'IN_HUMAN'] },
+    { key: 'handoff', label: '转人工', stages: ['WAITING_HUMAN', 'IN_HUMAN'] },
+    { key: 'human',   label: '人工服务', stages: ['IN_HUMAN'] }
+];
+
+function stageBadge(stage) {
+    const label = STAGE_LABELS[stage] || stage || '未知';
+    return '<span class="stage-badge stage-' + (stage || 'ASK') + '">' + label + '</span>';
+}
 
 async function loadSessions() {
     const list = document.getElementById('sessionList');
     const data = await api('/api/admin/chat/sessions');
     if (!data) { list.innerHTML = '<div class="empty-state"><i class="fas fa-inbox"></i> 加载失败</div>'; return; }
     const arr = Array.isArray(data) ? data : (data.records || data.list || []);
+    document.getElementById('sessCount').textContent = arr.length ? arr.length + ' 个会话' : '';
     if (!arr.length) { list.innerHTML = '<div class="empty-state"><i class="fas fa-inbox"></i> 暂无会话</div>'; return; }
     list.innerHTML = arr.map(s => {
-        const preview = (s.lastMessage || '').substring(0, 40);
+        const preview = plainPreview(s.lastMessage || '').substring(0, 30);
         const time = s.lastTime ? formatDate(s.lastTime) : '';
+        const unread = s.unreadCount > 0 ? '<span class="unread-badge">' + s.unreadCount + '</span>' : '';
         return `<div class="session-item" data-user-id="${s.userId}" onclick="selectSession(${s.userId})">
-            <span class="session-username">${escHtml(s.username || '用户' + s.userId)}</span>
-            <span class="session-preview">${escHtml(preview || '无消息')} ${time ? '· ' + time : ''}</span>
+            <div class="session-row1">
+                <span class="session-username">${escHtml(s.username || '用户' + s.userId)}</span>
+                ${unread}
+            </div>
+            <div class="session-row1">
+                ${stageBadge(s.stage)}
+                <span style="font-size:11px;color:#bbb">${time}</span>
+            </div>
+            <span class="session-preview">${escHtml(preview || '无消息')}</span>
         </div>`;
     }).join('');
 }
 
-function selectSession(userId) {
+function plainPreview(content) {
+    return String(content || '').replace(/\s+/g, ' ').trim();
+}
+
+async function selectSession(userId) {
     selectedUserId = userId;
+    lastMsgSignature = '';
     document.querySelectorAll('.session-item').forEach(el => {
         el.classList.toggle('active', el.dataset.userId == userId);
     });
     document.getElementById('chatEmpty').style.display = 'none';
-    document.getElementById('chatMessages').style.display = 'flex';
-    document.getElementById('chatInputWrap').style.display = 'flex';
-    document.getElementById('chatMessages').innerHTML = '';
-    loadHistory(userId);
+    const active = document.getElementById('chatActive');
+    active.style.display = 'flex';
+    startPoll();
+    await loadHistory(true);
 }
 
-async function loadHistory(userId) {
-    const data = await api('/api/admin/chat/history?userId=' + userId);
-    const wrap = document.getElementById('chatMessages');
+function renderStepper(stage) {
+    const curIdx = STEPS.findIndex(st => st.stages.includes(stage));
+    let html = '';
+    STEPS.forEach((step, i) => {
+        let cls = '';
+        if (i < curIdx) cls = 'done';
+        else if (i === curIdx) cls = 'current';
+        html += `<div class="step-item ${cls}"><span class="step-dot">${i < curIdx ? '<i class=\'fas fa-check\'></i>' : (i + 1)}</span>${step.label}</div>`;
+        if (i < STEPS.length - 1) html += `<div class="step-line ${i < curIdx ? 'done' : ''}"></div>`;
+    });
+    html += `<div style="margin-left:auto;font-size:12px;color:#888">当前：<b style="color:#C41A1A">${STAGE_LABELS[stage] || stage}</b></div>`;
+    document.getElementById('stageStepper').innerHTML = html;
+}
+
+function msgHtml(m) {
+    const sender = m.sender;
+    const time = m.createTime ? formatDate(m.createTime) : '';
+    const trace = m.traceNo ? `<div class="chat-trace"><i class="fas fa-route"></i> ${escHtml(m.traceNo)}</div>` : '';
+
+    if (sender === 'SYSTEM' || m.msgType === 'HANDOFF') {
+        return `<div class="chat-msg system"><div class="chat-bubble">${escHtml(m.content || '')}
+            <div class="chat-time">${time} ${trace}</div></div></div>`;
+    }
+    if (sender === 'ADMIN') {
+        return `<div class="chat-msg admin"><div class="chat-avatar"><i class="fas fa-headset"></i></div>
+            <div class="chat-bubble">${escHtml(m.content || '')}<div class="chat-time">${time}</div></div></div>`;
+    }
+    if (sender === 'BOT') {
+        const typeTag = m.msgType && m.msgType !== 'CHAT'
+            ? `<span class="sender-system-tag">${ ({CLARIFY:'候选追问',ANSWER:'完整答复',FALLBACK:'未能回答'})[m.msgType] || m.msgType }</span>` : '';
+        return `<div class="chat-msg bot"><div class="chat-avatar"><i class="fas fa-robot"></i></div>
+            <div class="chat-bubble">${escHtml(m.content || '')}
+            <div class="chat-time">智能客服${typeTag} ${time} ${trace}</div></div></div>`;
+    }
+    // USER
+    return `<div class="chat-msg user"><div class="chat-avatar"><i class="fas fa-user"></i></div>
+        <div class="chat-bubble">${escHtml(m.content || '')}<div class="chat-time">用户 ${time} ${trace}</div></div></div>`;
+}
+
+async function loadHistory(force) {
+    if (selectedUserId == null) return;
+    const data = await api('/api/admin/chat/history?userId=' + selectedUserId);
     if (!data) return;
-    const list = Array.isArray(data) ? data : (data.records || data.list || []);
-    wrap.innerHTML = list.map(m => {
-        const isUser = m.sender === 'USER';
-        return `<div class="chat-msg ${isUser ? 'user' : 'admin'}">
-            <div class="chat-bubble">${escHtml(m.content || '')}<div class="chat-time">${formatDate(m.createTime)}</div></div>
-        </div>`;
-    }).join('');
-    wrap.scrollTop = wrap.scrollHeight;
+    renderStepper(data.stage || 'ASK');
+    const wrap = document.getElementById('chatMessages');
+    const list = data.messages || [];
+    // 用"末条消息id+总数+阶段"判断有无变化，无变化不重绘，避免打断管理员查看历史
+    const last = list[list.length - 1];
+    const signature = selectedUserId + '|' + list.length + '|' + (last ? last.id : 0) + '|' + (data.stage || '');
+    if (!force && signature === lastMsgSignature) return;
+    const stickToBottom = wrap.scrollHeight - wrap.scrollTop - wrap.clientHeight < 60;
+    lastMsgSignature = signature;
+    wrap.innerHTML = list.map(msgHtml).join('');
+    if (stickToBottom || force) wrap.scrollTop = wrap.scrollHeight;
 }
 
 async function sendMessage() {
     const input = document.getElementById('chatInput');
     const content = input.value.trim();
-    if (!content || !selectedUserId) return;
+    if (!content || selectedUserId == null) return;
     const res = await api('/api/admin/chat/send?userId=' + selectedUserId + '&content=' + encodeURIComponent(content));
     if (res !== null) {
         input.value = '';
-        const wrap = document.getElementById('chatMessages');
-        wrap.innerHTML += `<div class="chat-msg admin">
-            <div class="chat-bubble">${escHtml(content)}<div class="chat-time">${formatDate(new Date())}</div></div>
-        </div>`;
-        wrap.scrollTop = wrap.scrollHeight;
+        await loadHistory(true);
         loadSessions();
     }
+}
+
+function startPoll() {
+    if (pollTimer) return;
+    pollTimer = setInterval(async () => {
+        await loadHistory();
+        await loadSessions();
+        // 保持当前选中高亮（loadSessions 重绘后）
+        if (selectedUserId != null) {
+            document.querySelectorAll('.session-item').forEach(el => {
+                el.classList.toggle('active', el.dataset.userId == selectedUserId);
+            });
+        }
+    }, 5000);
 }
 
 loadSessions();

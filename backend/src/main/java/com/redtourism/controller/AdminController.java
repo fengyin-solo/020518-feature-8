@@ -54,8 +54,6 @@ public class AdminController {
     private ScenicSpotImageMapper spotImageMapper;
     @Autowired
     private com.redtourism.mapper.SpotSuggestionMapper spotSuggestionMapper;
-    @Autowired
-    private com.redtourism.mapper.ServiceChatMapper chatMapper;
 
     // ==================== 用户管理 ====================
 
@@ -703,43 +701,29 @@ public class AdminController {
 
     // ==================== 人工客服 ====================
 
+    @Autowired
+    private CustomerServiceService customerService;
+
     @GetMapping("/chat/sessions")
     public Result<List<Map<String, Object>>> chatSessions() {
-        java.util.ArrayList<Map<String, Object>> result = new java.util.ArrayList<>();
-        java.util.Set<Long> seen = new java.util.HashSet<>();
-        List<ServiceChat> all = chatMapper.selectList(
-                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<ServiceChat>()
-                        .orderByDesc(ServiceChat::getCreateTime));
-        for (ServiceChat c : all) {
-            if (seen.contains(c.getUserId())) continue;
-            seen.add(c.getUserId());
-            Map<String, Object> m = new HashMap<>();
-            m.put("userId", c.getUserId());
-            User u = userMapper.selectById(c.getUserId());
-            m.put("username", u != null ? (u.getNickname() != null ? u.getNickname() : u.getUsername()) : "用户" + c.getUserId());
-            m.put("lastMessage", c.getContent());
-            m.put("lastTime", c.getCreateTime());
-            result.add(m);
-        }
-        return Result.success(result);
+        // 会话列表带当前链路阶段（提问/待选候选/已答复/等待人工/人工服务中）与未读数
+        return Result.success(customerService.adminSessions());
     }
 
     @GetMapping("/chat/history")
-    public Result<List<ServiceChat>> chatHistory(@RequestParam Long userId) {
-        return Result.success(chatMapper.selectList(
-                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<ServiceChat>()
-                        .eq(ServiceChat::getUserId, userId)
-                        .orderByAsc(ServiceChat::getCreateTime)));
+    public Result<Map<String, Object>> chatHistory(@RequestParam Long userId) {
+        // 会话详情同时返回链路阶段与完整处理经过（含智能客服追问、候选、答复记录）
+        Map<String, Object> data = new HashMap<>();
+        ServiceSession state = customerService.getSession(userId);
+        data.put("stage", state.getStage());
+        data.put("activeTraceNo", state.getActiveTraceNo());
+        data.put("messages", customerService.history(userId));
+        return Result.success(data);
     }
 
     @GetMapping("/chat/send")
     public Result<String> adminSendChat(@RequestParam Long userId, @RequestParam String content) {
-        ServiceChat c = new ServiceChat();
-        c.setUserId(userId);
-        c.setSender("ADMIN");
-        c.setContent(content);
-        c.setCreateTime(new Date());
-        chatMapper.insert(c);
+        customerService.adminSend(userId, content);
         return Result.success("发送成功", null);
     }
 

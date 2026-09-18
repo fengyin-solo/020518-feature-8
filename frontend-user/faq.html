@@ -6,6 +6,34 @@
     <title>客服中心 - 贵州红色旅游</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="css/style.css">
+    <style>
+        .chat-toolbar{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid #f0f0f0;background:#fafafa;border-radius:12px 12px 0 0}
+        .chat-stage{display:flex;align-items:center;gap:6px;font-size:13px;color:#666}
+        .chat-stage .stage-dot{width:8px;height:8px;border-radius:50%;background:#bbb}
+        .chat-stage.s-ask .stage-dot{background:#1890ff}
+        .chat-stage.s-clarify .stage-dot{background:#fa8c16}
+        .chat-stage.s-answer .stage-dot{background:#52c41a}
+        .chat-stage.s-waiting .stage-dot{background:#faad14}
+        .chat-stage.s-human .stage-dot{background:#C41A1A}
+        .candidate-list{display:flex;flex-direction:column;gap:8px;margin-top:10px;min-width:240px}
+        .candidate-btn{text-align:left;padding:9px 14px;border:1px solid #d9d9d9;background:#fff;border-radius:8px;font-size:13px;cursor:pointer;transition:all .2s;color:#333}
+        .candidate-btn:hover{border-color:#C41A1A;color:#C41A1A;background:#fff7f7}
+        .handoff-btn{margin-top:10px;background:#C41A1A;color:#fff;border:none;padding:8px 16px;border-radius:20px;font-size:13px;cursor:pointer}
+        .handoff-btn:hover{background:#a51616}
+        .chat-msg.system{justify-content:center}
+        .chat-msg.system .chat-bubble{background:#fffbe6;border:1px solid #ffe58f;color:#8c6d1f;font-size:13px;max-width:85%;border-radius:8px}
+        .chat-msg.bot.admin-msg .chat-icon{background:#52c41a;color:#fff}
+        .chat-msg.bot.admin-msg .chat-bubble{background:#f6ffed;border:1px solid #b7eb8f}
+        .msg-meta{font-size:11px;color:#999;margin-top:5px;display:flex;gap:8px;align-items:center}
+        .chat-msg.user .msg-meta{color:rgba(255,255,255,.75);justify-content:flex-end}
+        .msg-type-tag{padding:0 6px;border-radius:4px;font-size:10px;line-height:16px;background:#eee;color:#666}
+        .msg-type-tag.ANSWER{background:#e8f9e8;color:#389e0d}
+        .msg-type-tag.CLARIFY{background:#fff3e6;color:#d46b08}
+        .msg-type-tag.FALLBACK{background:#f0f0f0;color:#8c8c8c}
+        .msg-type-tag.HANDOFF{background:#fff1f0;color:#cf1322}
+        .quick-wrap{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;max-width:340px}
+        .quick-wrap .btn{white-space:nowrap}
+    </style>
 </head>
 <body>
 <header class="header">
@@ -30,8 +58,11 @@
 <div class="container">
     <div class="chat-page-wrap">
     <div class="chat-container">
-        <div style="display:flex;justify-content:flex-end;padding:8px 12px;border-bottom:1px solid #f0f0f0;background:#fafafa;border-radius:12px 12px 0 0">
-            <button id="modeToggle" class="btn btn-outline btn-sm" style="border-radius:20px" onclick="toggleMode()">
+        <div class="chat-toolbar">
+            <div class="chat-stage s-ask" id="stageBar">
+                <span class="stage-dot"></span><span id="stageLabel">智能客服</span>
+            </div>
+            <button id="modeToggle" class="btn btn-outline btn-sm" style="border-radius:20px" onclick="requestHandoff()">
                 <i class="fas fa-headset"></i> <span id="modeLabel">转人工客服</span>
             </button>
         </div>
@@ -48,141 +79,283 @@
 <script src="js/common.js"></script>
 <script>
 const chatEl = document.getElementById('chatMessages');
-let isHumanMode = false;
+const inputEl = document.getElementById('chatInput');
+
+// 当前链路阶段：ASK / CLARIFY / ANSWER / WAITING_HUMAN / IN_HUMAN
+let currentStage = 'ASK';
+let pendingRefIds = null;    // CLARIFY 阶段待选 FAQ id 列表
+let renderedIds = new Set();   // 已渲染的消息 id（轮询增量追加，保证顺序不乱）
 let pollTimer = null;
 
-function toggleMode() {
-    if (!isHumanMode) {
-        if (!getUser()) { showToast('请先登录后才能使用人工客服', 'error'); return; }
-        isHumanMode = true;
-        document.getElementById('modeLabel').textContent = '返回智能客服';
-        document.getElementById('modeToggle').style.background = '#C41A1A';
-        document.getElementById('modeToggle').style.color = '#fff';
-        document.getElementById('chatInput').placeholder = '输入消息给人工客服...';
-        chatEl.innerHTML = '';
-        addBotMsg('<i class="fas fa-headset"></i> 已转接人工客服，请输入您的问题，管理员会尽快回复。');
-        loadChatHistory();
-        startPoll();
+const STAGE_META = {
+    ASK:           { cls: 's-ask',     label: '智能客服 · 提问中' },
+    CLARIFY:       { cls: 's-clarify', label: '智能客服 · 待选择候选问题' },
+    ANSWER:        { cls: 's-answer',  label: '智能客服 · 已答复' },
+    WAITING_HUMAN: { cls: 's-waiting', label: '已转人工 · 等待客服接入' },
+    IN_HUMAN:      { cls: 's-human',   label: '人工客服服务中' }
+};
+
+function esc(s) {
+    if (s === null || s === undefined) return '';
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function isHumanStage(stage) { return stage === 'WAITING_HUMAN' || stage === 'IN_HUMAN'; }
+
+function renderStage(stage, pendingIds) {
+    currentStage = stage || 'ASK';
+    pendingRefIds = (pendingIds !== undefined ? pendingIds : null);
+    const meta = STAGE_META[currentStage] || STAGE_META.ASK;
+    const bar = document.getElementById('stageBar');
+    bar.className = 'chat-stage ' + meta.cls;
+    document.getElementById('stageLabel').textContent = meta.label;
+
+    const human = isHumanStage(currentStage);
+    document.getElementById('modeLabel').textContent =
+        currentStage === 'WAITING_HUMAN' ? '等待人工接入中' :
+        currentStage === 'IN_HUMAN' ? '人工服务中' : '转人工客服';
+    document.getElementById('modeToggle').disabled = human;
+    document.getElementById('modeToggle').style.opacity = human ? '.6' : '1';
+    inputEl.placeholder = human ? '输入消息给人工客服...' : '输入您的问题...';
+}
+
+/* ========== 消息渲染 ========== */
+
+function scrollBottom() { chatEl.scrollTop = chatEl.scrollHeight; }
+
+function renderMessage(m, animate) {
+    if (!m || renderedIds.has(m.id)) return false;
+    renderedIds.add(m.id);
+
+    if (m.sender === 'SYSTEM' || m.msgType === 'HANDOFF') { renderSystem(m); return true; }
+
+    if (m.sender === 'USER') {
+        appendRow('user', renderUserContent(m), m, false);
+    } else if (m.sender === 'ADMIN') {
+        appendRow('bot admin-msg', '<i class="fas fa-headset"></i>', esc(m.content), m, true);
     } else {
-        isHumanMode = false;
-        document.getElementById('modeLabel').textContent = '转人工客服';
-        document.getElementById('modeToggle').style.background = '';
-        document.getElementById('modeToggle').style.color = '';
-        document.getElementById('chatInput').placeholder = '输入您的问题...';
-        chatEl.innerHTML = '';
-        stopPoll();
-        loadFAQs();
+        // BOT 消息按类型渲染：候选追问 / 完整答复 / 未命中引导
+        let html = esc(m.content);
+        if (m.msgType === 'CLARIFY') {
+            // 处于 CLARIFY 阶段且这条就是最新的候选追问时，候选按钮仍可点击（重进页面可继续选择）
+            const interactive = currentStage === 'CLARIFY' && m.refIds === pendingRefIds;
+            html = renderClarify(m, interactive);
+        }
+        if (m.msgType === 'FALLBACK') html += '<div><button class="handoff-btn" onclick="requestHandoff()"><i class="fas fa-headset"></i> 转人工客服</button></div>';
+        appendRow('bot', '<i class="fas fa-robot"></i>', html, m, true);
     }
+    return true;
 }
 
-async function loadChatHistory() {
-    const data = await api('/api/chat/history');
-    if (!data) return;
-    data.forEach(m => {
-        if (m.sender === 'USER') addUserMsg(m.content);
-        else addAdminMsg(m.content);
-    });
+function renderUserContent(m) {
+    // 用户在追问阶段选择的候选问题，服务端以该 FAQ 问题原文存为用户消息
+    return esc(m.content);
 }
 
-function addAdminMsg(text) {
-    chatEl.innerHTML += '<div class="chat-msg bot"><div class="chat-icon" style="background:#52c41a"><i class="fas fa-headset"></i></div><div class="chat-bubble" style="background:#f6ffed;border:1px solid #b7eb8f">' + text + '</div></div>';
-    chatEl.scrollTop = chatEl.scrollHeight;
-}
-
-function startPoll() {
-    stopPoll();
-    pollTimer = setInterval(async () => {
-        const data = await api('/api/chat/history');
-        if (!data) return;
-        chatEl.innerHTML = '';
-        addBotMsg('<i class="fas fa-headset"></i> 人工客服模式');
-        data.forEach(m => {
-            if (m.sender === 'USER') addUserMsg(m.content);
-            else addAdminMsg(m.content);
-        });
-    }, 5000);
-}
-function stopPoll() { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } }
-
-function addBotMsg(text) {
-    chatEl.innerHTML += '<div class="chat-msg bot">' +
-        '<div class="chat-icon"><i class="fas fa-robot"></i></div>' +
-        '<div class="chat-bubble">' + text + '</div>' +
-    '</div>';
-    chatEl.scrollTop = chatEl.scrollHeight;
-}
-
-function addUserMsg(text) {
-    chatEl.innerHTML += '<div class="chat-msg user">' +
-        '<div class="chat-icon"><i class="fas fa-user"></i></div>' +
-        '<div class="chat-bubble">' + text + '</div>' +
-    '</div>';
-    chatEl.scrollTop = chatEl.scrollHeight;
-}
-
-function addQuickQuestions(faqs) {
-    let html = '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px">';
-    faqs.forEach(f => {
-        const q = f.question || f.title || f;
-        html += '<button class="btn btn-outline btn-sm" style="border-radius:20px" onclick="askQuestion(\'' + q.replace(/'/g, "\\'") + '\')">' + q + '</button>';
+function renderClarify(m, interactive) {
+    // 历史记录里的 CLARIFY 消息：候选问题文本已分别以用户选择/答复体现，
+    // 这里只展示追问提示与候选序号，不再产生重复交互
+    let html = '<div>' + esc(m.content) + '</div>';
+    html += '<div class="candidate-list">';
+    const ids = (m.refIds || '').split(',').filter(Boolean);
+    ids.forEach((id, i) => {
+        const faq = faqCache.get(id);
+        const q = faq ? faq.question : '候选问题 ' + (i + 1);
+        if (interactive) {
+            html += '<button class="candidate-btn" onclick="chooseCandidate(' + id + ',this)">'
+                 + (i + 1) + '. ' + esc(q) + '</button>';
+        } else {
+            html += '<div class="candidate-btn" style="cursor:default;color:#999">'
+                 + (i + 1) + '. ' + esc(q) + '</div>';
+        }
     });
     html += '</div>';
-    chatEl.innerHTML += '<div class="chat-msg bot">' +
-        '<div class="chat-icon"><i class="fas fa-robot"></i></div>' +
-        '<div class="chat-bubble">您可以点击下方常见问题快速提问：' + html + '</div>' +
-    '</div>';
-    chatEl.scrollTop = chatEl.scrollHeight;
+    return html;
 }
 
-async function loadFAQs() {
-    addBotMsg('您好！欢迎来到贵州红色旅游客服中心 🎉<br>我是智能客服小红，有什么可以帮您的？');
-    const data = await api('/api/faq/list');
-    if (data && data.length) {
-        addQuickQuestions(data);
+function appendRow(cls, icon, bodyHtml, m, isBotSide) {
+    const typeTag = m.msgType && m.msgType !== 'CHAT'
+        ? '<span class="msg-type-tag ' + m.msgType + '">' + typeLabel(m.msgType) + '</span>' : '';
+    const trace = m.traceNo ? '<span title="处理经过追踪号"><i class="fas fa-route"></i> ' + esc(m.traceNo) + '</span>' : '';
+    const meta = (typeTag || trace) ? '<div class="msg-meta">' + typeTag + trace + '</div>' : '';
+
+    let row;
+    if (cls === 'user') {
+        row = '<div class="chat-msg user"><div class="chat-icon"><i class="fas fa-user"></i></div>'
+            + '<div class="chat-bubble">' + bodyHtml + meta + '</div></div>';
+    } else {
+        row = '<div class="chat-msg ' + cls + '"><div class="chat-icon">' + icon + '</div>'
+            + '<div class="chat-bubble">' + bodyHtml + meta + '</div></div>';
     }
+    chatEl.insertAdjacentHTML('beforeend', row);
+    scrollBottom();
 }
 
+function renderSystem(m) {
+    chatEl.insertAdjacentHTML('beforeend',
+        '<div class="chat-msg system"><div class="chat-bubble">' + esc(m.content).replace(/\n/g, '<br>')
+        + '<div class="msg-meta"><span class="msg-type-tag HANDOFF">转人工</span>'
+        + (m.traceNo ? '<span><i class="fas fa-route"></i> ' + esc(m.traceNo) + '</span>' : '')
+        + '</div></div></div>');
+    scrollBottom();
+}
+
+function typeLabel(t) {
+    return { CLARIFY: '候选追问', ANSWER: '完整答复', FALLBACK: '未能回答', HANDOFF: '转人工' }[t] || t;
+}
+
+/* 本地即时消息（未登录游客 / 等待服务端回包期间） */
+function addUserMsg(text) {
+    chatEl.insertAdjacentHTML('beforeend',
+        '<div class="chat-msg user"><div class="chat-icon"><i class="fas fa-user"></i></div>'
+        + '<div class="chat-bubble">' + esc(text) + '</div></div>');
+    scrollBottom();
+}
+function addBotMsg(html) {
+    chatEl.insertAdjacentHTML('beforeend',
+        '<div class="chat-msg bot"><div class="chat-icon"><i class="fas fa-robot"></i></div>'
+        + '<div class="chat-bubble">' + html + '</div></div>');
+    scrollBottom();
+}
+
+/* ========== FAQ 缓存（候选问题渲染用） ========== */
+const faqCache = new Map();
+async function loadFaqCache() {
+    const data = await api('/api/faq/list');
+    if (Array.isArray(data)) data.forEach(f => faqCache.set(String(f.id), f));
+}
+
+/* ========== 历史消息（重进页面顺序保持不变） ========== */
+async function loadHistory() {
+    const data = await api('/api/chat/history');
+    if (!data) return;
+    renderStage(data.stage, data.pendingFaqIds);
+    const msgs = data.messages || [];
+    // 严格按服务端顺序（create_time, id 升序）渲染
+    msgs.forEach(m => renderMessage(m, false));
+    if (!msgs.length) showWelcome(true);
+    startPoll();
+}
+
+function showWelcome(withQuick) {
+    addBotMsg('您好！欢迎来到贵州红色旅游客服中心 🎉<br>我是智能客服小红，请描述您的问题。'
+        + '当多个问题相近时，我会列出选项请您确认后再给出完整回答。');
+    if (!withQuick) return;
+    if (!faqCache.size) return;
+    let html = '<div>您也可以点击常见问题快速提问：</div><div class="quick-wrap">';
+    Array.from(faqCache.values()).slice(0, 8).forEach(f => {
+        html += '<button class="btn btn-outline btn-sm" style="border-radius:20px" onclick="askQuestion(this.dataset.q)" data-q="'
+             + esc(f.question) + '">' + esc(f.question) + '</button>';
+    });
+    html += '</div>';
+    addBotMsg(html);
+}
+
+/* ========== 提问 / 选择候选 ========== */
 function askQuestion(q) {
-    document.getElementById('chatInput').value = '';
-    addUserMsg(q);
-    doAsk(q);
+    inputEl.value = '';
+    handleSend(q);
 }
 
 async function sendMessage() {
-    const input = document.getElementById('chatInput');
-    const q = input.value.trim();
+    const q = inputEl.value.trim();
     if (!q) return;
-    input.value = '';
-    if (isHumanMode) {
-        if (!getUser()) { showToast('请先登录', 'error'); return; }
+    inputEl.value = '';
+    await handleSend(q);
+}
+
+async function handleSend(q) {
+    if (!getUser()) {
+        // 游客：仅提供无状态的关键词单句应答，并提示登录后可保留完整链路
         addUserMsg(q);
+        const raw = await apiRaw('/api/faq/ask?question=' + encodeURIComponent(q));
+        if (raw && raw.code === 200) {
+            addBotMsg(esc(raw.data || '').replace(/\n/g, '<br>')
+                + '<div style="margin-top:8px;font-size:12px;color:#999">登录后提问可保留完整对话记录，随时可转人工客服。</div>');
+        }
+        return;
+    }
+
+    if (isHumanStage(currentStage)) {
         await api('/api/chat/send?content=' + encodeURIComponent(q));
-    } else {
-        addUserMsg(q);
-        await doAsk(q);
+        await refreshHistory();
+        return;
+    }
+    await submitQuestion(q);
+}
+
+async function submitQuestion(q) {
+    const typingId = showTyping();
+    const reply = await api('/api/faq/bot/ask?question=' + encodeURIComponent(q));
+    removeTyping(typingId);
+    if (!reply) return;
+    // 服务端已把这一轮消息落库，直接拉取统一渲染，避免本地与历史不一致
+    await refreshHistory();
+}
+
+async function chooseCandidate(faqId, btnEl) {
+    const buttons = btnEl.parentElement.querySelectorAll('.candidate-btn');
+    buttons.forEach(b => b.disabled = true);
+    const typingId = showTyping();
+    const raw = await apiRaw('/api/faq/bot/choose?faqId=' + faqId);
+    removeTyping(typingId);
+    if (!raw || raw.code !== 200) {
+        showToast((raw && raw.msg) || '选择失败，请重新提问', 'error');
+        buttons.forEach(b => b.disabled = false);
+        return;
+    }
+    await refreshHistory();
+}
+
+/* ========== 转人工（携带此前全部对话） ========== */
+async function requestHandoff() {
+    if (!getUser()) { showToast('请先登录后再转接人工客服', 'error'); setTimeout(() => location.href = 'login.html', 800); return; }
+    if (isHumanStage(currentStage)) return;
+    const res = await api('/api/chat/handoff');
+    if (res) {
+        showToast('已为您转接人工客服，请稍候');
+        await refreshHistory();
+        startPoll();
     }
 }
 
-async function doAsk(question) {
-    const typingId = 'typing_' + Date.now();
-    chatEl.innerHTML += '<div class="chat-msg bot" id="' + typingId + '">' +
-        '<div class="chat-icon"><i class="fas fa-robot"></i></div>' +
-        '<div class="chat-bubble"><i class="fas fa-spinner fa-spin"></i> 正在思考...</div>' +
-    '</div>';
-    chatEl.scrollTop = chatEl.scrollHeight;
-
-    const data = await api('/api/faq/ask?question=' + encodeURIComponent(question));
-    const typingEl = document.getElementById(typingId);
-    if (typingEl) typingEl.remove();
-
-    if (data) {
-        addBotMsg(data.answer || data.content || data);
-    } else {
-        addBotMsg('抱歉，我暂时无法回答这个问题，您可以换个方式提问或联系人工客服。');
+/* ========== 轮询：增量追加，不清空、不重排 ========== */
+async function refreshHistory() {
+    const data = await api('/api/chat/history');
+    if (!data) return;
+    renderStage(data.stage, data.pendingFaqIds);
+    // 已离开候选阶段时，历史追问里的候选按钮统一禁用，避免误点（后端也会校验拒绝）
+    if (currentStage !== 'CLARIFY') {
+        chatEl.querySelectorAll('.candidate-btn').forEach(b => { b.disabled = true; });
     }
+    (data.messages || []).forEach(m => renderMessage(m, false));
 }
 
-loadFAQs();
+function startPoll() {
+    if (pollTimer) return;
+    pollTimer = setInterval(refreshHistory, 5000);
+}
+
+function showTyping() {
+    const id = 'typing_' + Date.now();
+    chatEl.insertAdjacentHTML('beforeend',
+        '<div class="chat-msg bot" id="' + id + '"><div class="chat-icon"><i class="fas fa-robot"></i></div>'
+        + '<div class="chat-bubble"><i class="fas fa-spinner fa-spin"></i> 正在思考...</div></div>');
+    scrollBottom();
+    return id;
+}
+function removeTyping(id) { const el = document.getElementById(id); if (el) el.remove(); }
+
+/* ========== 初始化 ========== */
+(async function init() {
+    await loadFaqCache();
+    if (getUser()) {
+        await loadHistory();
+    } else {
+        renderStage('ASK');
+        showWelcome(true);
+    }
+})();
 </script>
 </body>
 </html>
